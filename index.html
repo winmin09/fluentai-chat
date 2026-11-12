@@ -1,3 +1,9 @@
+요청하신 두 가지 기능을 반영해 전체 코드를 수정했습니다.
+ * 상단 배너 버튼 변경 (문법 교정 켜짐/끔 → 해석 켜짐/끔):
+   * 상단 배너 버튼을 클릭하면 해석 켜짐 / 해석 끔 상태로 전환되며, 기존 메시지 및 새로 오는 메시지의 한국어 번역(translation) 표시 여부가 즉시 토글됩니다. (문법 교정 코칭은 우측 설정 패널의 스위치를 통해 계속 켜고 끌 수 있습니다.)
+ * TTS(음성 읽기) 기능 추가:
+   * 브라우저 내장 Web Speech API (speechSynthesis)를 연동하여 AI가 새 답변을 보낼 때 자동으로 영어 문장을 읽어줍니다.
+   * 각 AI 말풍선 우측 상단에 스피커(🔊) 아이콘 버튼을 추가해 언제든 다시 듣거나 재생을 멈출 수 있습니다.
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -207,9 +213,10 @@
                         <span class="font-medium text-slate-300">현재 상황:</span>
                         <span id="current-scenario-desc" class="truncate text-slate-400">설정 버튼을 눌러 상황을 지정하세요.</span>
                     </div>
-                    <button id="btn-toggle-coaching-banner" class="flex items-center space-x-1.5 px-2.5 py-1 rounded border transition cursor-pointer text-indigo-400 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20 shrink-0">
-                        <i data-lucide="shield-alert" class="w-3.5 h-3.5" id="coaching-icon"></i>
-                        <span id="coaching-status-text">문법 교정 켜짐</span>
+                    <!-- 한국어 해석 토글 버튼 -->
+                    <button id="btn-toggle-translation-banner" class="flex items-center space-x-1.5 px-2.5 py-1 rounded border transition cursor-pointer text-indigo-400 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20 shrink-0">
+                        <i data-lucide="languages" class="w-3.5 h-3.5" id="translation-icon"></i>
+                        <span id="translation-status-text">해석 켜짐</span>
                     </button>
                 </div>
 
@@ -306,6 +313,36 @@
             throw lastError || new Error("Groq API 모델 및 키 요청 시도가 모두 실패하였습니다.");
         }
 
+        // --- TTS (Web Speech API) 기능 ---
+        function speakEnglishText(text) {
+            if (!('speechSynthesis' in window) || !text) return;
+            
+            // 기존에 재생 중인 음성이 있으면 중지
+            window.speechSynthesis.cancel();
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'en-US';
+            utterance.rate = 0.95; // 자연스러운 속도
+            utterance.pitch = 1.0;
+
+            // 영어 원어민 목소리 우선 선택
+            const voices = window.speechSynthesis.getVoices();
+            const preferredVoice = voices.find(v => v.lang === 'en-US' && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Samantha')))
+                                || voices.find(v => v.lang.startsWith('en-'));
+            if (preferredVoice) {
+                utterance.voice = preferredVoice;
+            }
+
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // 브라우저 비동기 음성 목록 로드 대응
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.onvoiceschanged = () => {
+                window.speechSynthesis.getVoices();
+            };
+        }
+
         const appRoot = document.getElementById('app-root');
         const btnConfig = document.getElementById('btn-config');
         const btnCloseConfig = document.getElementById('btn-close-config');
@@ -313,9 +350,12 @@
         const btnCloseChats = document.getElementById('btn-close-chats');
         const btnNewChat = document.getElementById('btn-new-chat');
         const btnApplySettings = document.getElementById('btn-apply-settings');
-        const btnToggleCoachingBanner = document.getElementById('btn-toggle-coaching-banner');
-        const coachingIcon = document.getElementById('coaching-icon');
-        const coachingStatusText = document.getElementById('coaching-status-text');
+        
+        // 해석 토글 관련 요소
+        const btnToggleTranslationBanner = document.getElementById('btn-toggle-translation-banner');
+        const translationIcon = document.getElementById('translation-icon');
+        const translationStatusText = document.getElementById('translation-status-text');
+        
         const toggleCoachingSetting = document.getElementById('toggle-coaching-setting');
         const settingsPanel = document.getElementById('settings-panel');
         const chatListPanel = document.getElementById('chat-list-panel');
@@ -355,6 +395,7 @@
                     title: 'Alex',
                     avatar: '🤖',
                     enableCoaching: true,
+                    enableTranslation: true,
                     persona: {
                         name: "Alex",
                         character: "Friendly Native English Friend",
@@ -465,24 +506,33 @@
             });
         }
 
-        btnToggleCoachingBanner.addEventListener('click', () => {
+        // 상단 배너: 해석 켜기/끄기 토글 이벤트
+        btnToggleTranslationBanner.addEventListener('click', () => {
             const activeChat = getCurrentChat();
-            activeChat.enableCoaching = !activeChat.enableCoaching;
-            updateCoachingUI(activeChat.enableCoaching);
+            const currentState = activeChat.enableTranslation !== false;
+            activeChat.enableTranslation = !currentState;
+            updateTranslationUI(activeChat.enableTranslation);
             saveChatsToStorage();
         });
 
-        function updateCoachingUI(isEnabled) {
-            toggleCoachingSetting.checked = isEnabled;
+        function updateTranslationUI(isEnabled) {
             if (isEnabled) {
-                btnToggleCoachingBanner.className = "flex items-center space-x-1.5 px-2.5 py-1 rounded border transition cursor-pointer text-indigo-400 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20 shrink-0";
-                coachingStatusText.textContent = "문법 교정 켜짐";
-                coachingIcon.setAttribute('data-lucide', 'shield-alert');
+                btnToggleTranslationBanner.className = "flex items-center space-x-1.5 px-2.5 py-1 rounded border transition cursor-pointer text-indigo-400 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20 shrink-0";
+                translationStatusText.textContent = "해석 켜짐";
             } else {
-                btnToggleCoachingBanner.className = "flex items-center space-x-1.5 px-2.5 py-1 rounded border transition cursor-pointer text-slate-500 bg-slate-800/50 border-slate-700 hover:bg-slate-800 shrink-0";
-                coachingStatusText.textContent = "문법 교정 끔";
-                coachingIcon.setAttribute('data-lucide', 'shield-off');
+                btnToggleTranslationBanner.className = "flex items-center space-x-1.5 px-2.5 py-1 rounded border transition cursor-pointer text-slate-500 bg-slate-800/50 border-slate-700 hover:bg-slate-800 shrink-0";
+                translationStatusText.textContent = "해석 끔";
             }
+
+            // 화면에 이미 렌더링된 한국어 해석 텍스트 표시/숨김 즉시 반영
+            document.querySelectorAll('.ai-translation-text').forEach(el => {
+                if (isEnabled) {
+                    el.classList.remove('hidden');
+                } else {
+                    el.classList.add('hidden');
+                }
+            });
+
             refreshIcons();
         }
 
@@ -550,6 +600,7 @@
                 title: `Partner ${chats.length + 1}`,
                 avatar: '🤖',
                 enableCoaching: true,
+                enableTranslation: true,
                 persona: {
                     name: "Sam",
                     character: "English Partner",
@@ -572,22 +623,27 @@
             const activeChat = getCurrentChat();
             currentScenarioDesc.textContent = `[${activeChat.persona.name} / ${activeChat.persona.character}] ${activeChat.persona.situation}`;
             chatCountSpan.textContent = chats.length;
-            updateCoachingUI(activeChat.enableCoaching !== false);
+            updateTranslationUI(activeChat.enableTranslation !== false);
             
             chatBox.innerHTML = '';
             
             if (activeChat.history.length === 0) {
+                const welcomeText = `Hello! My name is ${activeChat.persona.name}. Ready to practice English? Type something below or tell me about your day!`;
                 const msgEl = document.createElement('div');
                 msgEl.className = 'flex items-start space-x-3 max-w-2xl';
                 msgEl.innerHTML = `
                     ${renderAvatarBadge(activeChat.avatar)}
-                    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-slate-200 shadow-sm space-y-2">
-                        <p class="font-semibold text-sm text-indigo-400">${escapeHtml(activeChat.persona.name)} (${escapeHtml(activeChat.persona.character)})</p>
-                        <p class="text-sm leading-relaxed">
-                            Hello! My name is ${escapeHtml(activeChat.persona.name)}. Ready to practice English? Type something below or tell me about your day!
-                        </p>
+                    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-slate-200 shadow-sm space-y-2 flex-1">
+                        <div class="flex items-center justify-between">
+                            <p class="font-semibold text-sm text-indigo-400">${escapeHtml(activeChat.persona.name)} (${escapeHtml(activeChat.persona.character)})</p>
+                            <button type="button" class="btn-tts-play p-1 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-lg transition" title="음성으로 듣기">
+                                <i data-lucide="volume-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                        <p class="text-sm leading-relaxed">${escapeHtml(welcomeText)}</p>
                     </div>
                 `;
+                msgEl.querySelector('.btn-tts-play').addEventListener('click', () => speakEnglishText(welcomeText));
                 chatBox.appendChild(msgEl);
             } else {
                 activeChat.history.forEach(msg => {
@@ -655,6 +711,7 @@ ${coachingEnabled ? 'Analyze input for grammar/typo. Return 1-3 items in "correc
 
         function appendAIMessageUI(data, triggerSpeech = true) {
             const activeChat = getCurrentChat();
+            const isTranslationOn = activeChat.enableTranslation !== false;
             const msgEl = document.createElement('div');
             msgEl.className = 'flex items-start space-x-3 max-w-2xl';
 
@@ -684,16 +741,30 @@ ${coachingEnabled ? 'Analyze input for grammar/typo. Return 1-3 items in "correc
                 <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-slate-200 shadow-sm space-y-2 relative group flex-1">
                     <div class="flex items-center justify-between">
                         <span class="font-semibold text-xs text-indigo-400">${escapeHtml(activeChat.persona.name || activeChat.persona.character)}</span>
+                        <button type="button" class="btn-tts-play p-1 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-lg transition" title="다시 듣기">
+                            <i data-lucide="volume-2" class="w-4 h-4"></i>
+                        </button>
                     </div>
                     <p class="text-sm leading-relaxed">${escapeHtml(data.reply)}</p>
-                    ${data.translation ? `<p class="text-xs text-slate-400 border-t border-slate-800/60 pt-2 font-light">${escapeHtml(data.translation)}</p>` : ''}
+                    ${data.translation ? `<p class="ai-translation-text text-xs text-slate-400 border-t border-slate-800/60 pt-2 font-light ${isTranslationOn ? '' : 'hidden'}">${escapeHtml(data.translation)}</p>` : ''}
                     ${correctionsHTML}
                 </div>
             `;
 
+            // 스피커 버튼 클릭 시 해당 영어 문장 읽기
+            const ttsBtn = msgEl.querySelector('.btn-tts-play');
+            if (ttsBtn && data.reply) {
+                ttsBtn.addEventListener('click', () => speakEnglishText(data.reply));
+            }
+
             chatBox.appendChild(msgEl);
             refreshIcons();
             scrollToBottom();
+
+            // 새 메시지 도착 시 자동 음성 읽기
+            if (triggerSpeech && data.reply) {
+                speakEnglishText(data.reply);
+            }
         }
 
         async function fetchAIResponse(userMessage, isInitial = false) {
@@ -764,6 +835,11 @@ ${coachingEnabled ? 'Analyze input for grammar/typo. Return 1-3 items in "correc
             const text = userInput.value.trim();
             if (!text) return;
 
+            // 사용자 메시지 전송 시 재생 중이던 TTS 중지
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+            }
+
             userInput.value = '';
             appendUserMessageUI(text);
 
@@ -807,7 +883,10 @@ ${coachingEnabled ? 'Analyze input for grammar/typo. Return 1-3 items in "correc
             recognition.lang = 'en-US';
             recognition.interimResults = false;
 
-            recognition.onstart = () => sttStatus.classList.remove('hidden');
+            recognition.onstart = () => {
+                if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+                sttStatus.classList.remove('hidden');
+            };
             recognition.onresult = (e) => { userInput.value = e.results[0][0].transcript; };
             recognition.onerror = () => sttStatus.classList.add('hidden');
             recognition.onend = () => sttStatus.classList.add('hidden');
@@ -897,6 +976,7 @@ ${coachingEnabled ? 'Analyze input for grammar/typo. Return 1-3 items in "correc
         }
 
         function switchChatRoom(id) {
+            if ('speechSynthesis' in window) window.speechSynthesis.cancel();
             currentChatId = id;
             saveChatsToStorage();
             renderCurrentChat();
@@ -931,3 +1011,4 @@ ${coachingEnabled ? 'Analyze input for grammar/typo. Return 1-3 items in "correc
     </script>
 </body>
 </html>
+
